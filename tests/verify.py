@@ -45,6 +45,13 @@ def game(name):
 g = game('Game A (USA)')
 check(g['data_path'] == 'Game A (USA)/' and g['data_slots'] == [
     {'id': 14, 'filename': 'Game A (USA).cue'}, {'id': 16, 'filename': 'Game A (USA).bin'}], 'Game A: game file')
+def writes(name):
+    return {w['address']: w['data'] for w in game(name).get('memory_writes', [])}
+
+
+check(writes('Game A (USA)') == {'0x80000020': '0x0000000C'}, 'Game A: region Europe PAL (area E)')
+check(writes('Game B (Japan)') == {'0x80000020': '0x00000001', '0x80000028': '0x00000001'}, 'Game B: Japan + Dezaemon 2 patch')
+check(writes('Saga (USA) (Disc 1)') == {'0x80000020': '0x00000001', '0x80000024': '0x00000003'}, 'Saga disc 1: first area J, 4 MB cart')
 g = game('Redump X (Europe)')
 check([s['id'] for s in g['data_slots']] == [14, 16, 17] and g['data_slots'][2]['filename'] == 'Redump X (Europe) (Track 2).bin',
       'Redump X: per-track files as they are')

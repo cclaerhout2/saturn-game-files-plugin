@@ -46,6 +46,21 @@ the count out from the core's `data.json`.
 - **Game files.** One `Assets/saturn/akoaysigod.Saturn/<disc>.json` per disc:
   the `.cue` in slot 14 and its files from slot 16. A `.bin` without a `.cue`
   gets slot 16 only.
+- **Region, cartridge and patches, per game.** On MiSTer, the main program
+  reads the disc's header and sets the region (and so PAL or NTSC), the RAM
+  cartridge and the Dezaemon 2 patch. The Pocket core has registers for
+  these, which it expects in each game file's `memory_writes`
+  (`src/fpga/pocket_rtl/pk_settings.sv`). The plugin writes them as MiSTer
+  sets them:
+  - region `0x80000020`: the disc's first area symbol (IP.BIN 0x40). Without it
+    the core assumes USA, and a European disc stops at "Game disc unsuitable
+    for this system";
+  - RAM cartridge `0x80000024`: 1 MB or 4 MB for the games listed in MiSTer's
+    `saturn_ramcart.txt` (Saturn_MiSTer, from satakore.com), by product number;
+  - Dezaemon 2 patch `0x80000028`, for T-16804G.
+
+  These apply while Core Settings > Region and Cartridge are on *Auto*, their
+  default. A setting chosen there wins.
 - **Multi-disc games** ("… (Disc 1)", "… (Disc 2)"). The core can't swap
   discs, so each disc keeps its own game file. All discs of one game share
   one save (internal backup RAM and backup cartridge), in

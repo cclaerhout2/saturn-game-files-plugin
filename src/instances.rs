@@ -998,16 +998,100 @@ fn json_string(text: &str) -> String {
     out
 }
 
-pub(crate) fn instance_json(data_path: &str, slots: &[(i64, String)]) -> String {
+pub(crate) fn instance_json(data_path: &str, slots: &[(i64, String)], writes: &[(u32, u32)]) -> String {
     let slots: Vec<String> = slots
         .iter()
         .map(|(id, filename)| format!("      {{\n        \"id\": {id},\n        \"filename\": {}\n      }}", json_string(filename)))
         .collect();
+    let writes = if writes.is_empty() {
+        String::new()
+    } else {
+        let w: Vec<String> = writes
+            .iter()
+            .map(|(a, d)| format!("      {{\n        \"address\": \"0x{a:08X}\",\n        \"data\": \"0x{d:08X}\"\n      }}"))
+            .collect();
+        format!(",\n    \"memory_writes\": [\n{}\n    ]", w.join(",\n"))
+    };
     format!(
-        "{{\n  \"instance\": {{\n    \"magic\": \"APF_VER_1\",\n    \"data_path\": {},\n    \"data_slots\": [\n{}\n    ]\n  }}\n}}\n",
+        "{{\n  \"instance\": {{\n    \"magic\": \"APF_VER_1\",\n    \"data_path\": {},\n    \"data_slots\": [\n{}\n    ]{writes}\n  }}\n}}\n",
         json_string(data_path),
         slots.join(",\n")
     )
+}
+
+// ---- per-game settings (pk_settings.sv in the core) ----------------------------------
+
+/// The core's registers for an instance JSON's memory_writes, used while
+/// Core Settings > Region and Cartridge are on Auto (their default): MiSTer's
+/// main program and Saturn.sv take these from the disc's header, which the
+/// Pocket doesn't read.
+const AREA_AUTO: u32 = 0x8000_0020;
+const CART_AUTO: u32 = 0x8000_0024;
+const DEZAEMON2: u32 = 0x8000_0028;
+/// MiSTer's RAM cartridge database (Saturn_MiSTer releases/saturn_ramcart.txt).
+const RAMCART_DB: &str = include_str!("instances/saturn_ramcart.txt");
+
+/// The disc's IP.BIN (its first 256 bytes) from the first data sector of
+/// the file, or None when it is not a Saturn disc.
+fn boot_header(path: &Path) -> Option<[u8; 256]> {
+    let mut file = fs::File::open(path).ok()?;
+    let mut header = [0u8; 256];
+    file.seek(SeekFrom::Start(16)).ok()?;
+    file.read_exact(&mut header).ok()?;
+    header.starts_with(SATURN_ID).then_some(header)
+}
+
+/// The memory writes for a disc (from its first file), and what they say
+/// for the report: the area (Saturn.sv: the first area symbol at 0x40), the
+/// RAM cartridge MiSTer's database names for its product number (at 0x20),
+/// and the Dezaemon 2 patch.
+fn game_settings(first: &Path) -> (Vec<(u32, u32)>, String) {
+    let Some(h) = boot_header(first) else { return (vec![], String::new()) };
+    let mut writes = vec![];
+    let mut notes = vec![];
+    let area = match h[0x40] {
+        b'J' => Some((0x1, "Japan")),
+        b'T' => Some((0x2, "Asia NTSC")),
+        b'U' => Some((0x4, "USA")),
+        b'B' => Some((0x5, "Brazil")),
+        b'K' => Some((0x6, "Korea")),
+        b'A' => Some((0xA, "Asia PAL")),
+        b'E' => Some((0xC, "Europe PAL")),
+        b'L' => Some((0xD, "Latin America PAL")),
+        _ => None,
+    };
+    if let Some((code, name)) = area {
+        writes.push((AREA_AUTO, code));
+        notes.push(format!("region {name}"));
+    }
+    // The product number as MiSTer's saturn_ramcart_make_uuid() reads it.
+    let raw = &h[0x20..0x2A];
+    let len = raw.iter().rposition(|&c| c != b' ' && c != 0).map_or(0, |i| i + 1);
+    let id: String = raw[..len].iter().map(|&c| (c as char).to_ascii_uppercase()).collect();
+    if len > 0 && !id.contains(|c: char| c.is_whitespace() || c == '\0') {
+        let cart = RAMCART_DB.lines().find_map(|line| {
+            let line = line.trim_start_matches('\u{feff}').split(['#', ';']).next()?.trim();
+            let mut words = line.split_whitespace();
+            let (uuid, kind) = (words.next()?, words.next()?);
+            (words.next().is_none() && uuid.eq_ignore_ascii_case(&id)).then(|| kind.to_ascii_uppercase())
+        });
+        match cart.as_deref() {
+            Some("1M") => {
+                writes.push((CART_AUTO, 2));
+                notes.push("1 MB RAM cartridge".into());
+            }
+            Some("4M") => {
+                writes.push((CART_AUTO, 3));
+                notes.push("4 MB RAM cartridge".into());
+            }
+            _ => {}
+        }
+    }
+    if &h[0x20..0x28] == b"T-16804G" {
+        writes.push((DEZAEMON2, 1));
+        notes.push("Dezaemon 2 patch".into());
+    }
+    (writes, notes.iter().map(|n| format!(", {n}")).collect())
 }
 
 /// A Saturn core on the card.
@@ -1103,6 +1187,8 @@ struct Disc {
     slots: Vec<(i64, String)>,
     /// What the report says about it.
     what: String,
+    /// Per-game settings (memory_writes).
+    writes: Vec<(u32, u32)>,
 }
 
 /// Write Assets/<platform>/<core>/<game>.json for every playable disc under
@@ -1140,11 +1226,13 @@ pub fn make_instances(card: &Path, core: &str, platform: &str, log: &mut dyn FnM
             skipped += 1;
             continue;
         }
+        let (writes, notes) = game_settings(&bin);
         discs.push(Disc {
             name: stem(&name).to_string(),
             folder: bin.parent().unwrap().to_path_buf(),
             slots: vec![(slots.bins[0], name)],
-            what: "1 track, no .cue".into(),
+            what: format!("1 track, no .cue{notes}"),
+            writes,
         });
     }
     for cue in walk(&common, &|n| has_ext(n, ".cue")) {
@@ -1178,13 +1266,15 @@ pub fn make_instances(card: &Path, core: &str, platform: &str, log: &mut dyn FnM
             log(&format!("warning: {shown}: no Saturn disc ID (\"SEGA SEGASATURN\") in its first sector; the game file is made, but check that it is a Saturn disc"));
         }
         let tracks: usize = files.iter().map(|f| f.1.len()).sum();
+        let (writes, notes) = game_settings(&first);
         let mut disc_slots = vec![(slots.cue, cue_name.clone())];
         disc_slots.extend(files.iter().enumerate().map(|(k, (n, _))| (slots.bins[k], n.clone())));
         discs.push(Disc {
             name: cue_stem,
             folder,
             slots: disc_slots,
-            what: format!("{tracks} track{}, {} file{}", if tracks == 1 { "" } else { "s" }, files.len(), if files.len() == 1 { "" } else { "s" }),
+            what: format!("{tracks} track{}, {} file{}{notes}", if tracks == 1 { "" } else { "s" }, files.len(), if files.len() == 1 { "" } else { "s" }),
+            writes,
         });
     }
     // Multi-disc games share one save (the core has no disc swap: each disc
@@ -1218,7 +1308,7 @@ pub fn make_instances(card: &Path, core: &str, platform: &str, log: &mut dyn FnM
             shared_note = format!(", shared save {game}{}", slots.saves[0].1);
         }
         let file = out.join(format!("{}.json", d.name));
-        write_bytes(&file, instance_json(&prefix, &entries).as_bytes()).map_err(|e| format!("{}.json: {e}", d.name))?;
+        write_bytes(&file, instance_json(&prefix, &entries, &d.writes).as_bytes()).map_err(|e| format!("{}.json: {e}", d.name))?;
         log(&format!("wrote {}.json ({}{shared_note})", d.name, d.what));
         written += 1;
     }

@@ -14,6 +14,8 @@ import struct
 import sys
 
 SECTOR = 2352
+# (product number, area symbols) of the next discs' IP.BIN, in the order they are made.
+HEADERS = []
 UNIT = 2448
 FRAMES_PER_HUNK = 8
 
@@ -30,7 +32,11 @@ def data_sector(lba, rng, first=False):
     header = bytes([bcd(a // 4500), bcd(a // 75 % 60), bcd(a % 75), 1])
     body = bytearray(rng.randbytes(SECTOR - 16))
     if first:
+        body[:256] = bytes(256)
         body[:16] = b'SEGA SEGASATURN '
+        product, area = HEADERS.pop(0) if HEADERS else (b'T-0000G', b'JTUE')
+        body[0x20:0x2A] = product.ljust(10)
+        body[0x40:0x50] = area.ljust(16)
     return sync + header + bytes(body)
 
 
@@ -140,6 +146,7 @@ def main():
             'flat': True,
         }
 
+    HEADERS[:] = [(b'MK-81009', b'E'), (b'T-16804G', b'J'), (b'T-1521G', b'JUE')]
     chd('Game A (USA)', 'Game A (USA)', [('MODE1/2352', 300), ('AUDIO', 151), ('AUDIO', 77)], [(0, False), (150, True), (150, True)])
     chd('Game B (Japan)', 'Game B (Japan)', [('MODE1/2352', 97), ('AUDIO', 40)], [(0, False), (150, False)])
     chd('Saga (USA) (Disc 1)', 'Saga (USA) (Disc 1)', [('MODE1/2352', 50)], [(0, False)])
