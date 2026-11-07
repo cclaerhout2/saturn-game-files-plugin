@@ -1,0 +1,29 @@
+# Builds plugin.wasm and runs it, as Pocket Sync does, on a test SD card with
+# CHD images (tests/make_card.py), then checks every converted file and game
+# file (tests/verify.py): once keeping the originals, once replacing them on
+# a card too full to hold both.
+name: Test
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup target add wasm32-wasip1
+      - run: cargo test --locked --lib --target x86_64-unknown-linux-gnu
+      - run: scripts/build.sh
+      - run: pip install extism
+      - name: Keep the originals
+        run: |
+          python3 tests/make_card.py /tmp/keep
+          python3 host/run_plugin.py target/wasm32-wasip1/release/plugin.wasm /tmp/keep/pocket \
+            --host-folder /tmp/keep/host --config verbose=1 --answer "Convert them, keep"
+          python3 tests/verify.py /tmp/keep keep
+      - name: Replace them on a full card
+        run: |
+          python3 tests/make_card.py /tmp/full
+          used=$(find /tmp/full/pocket -type f -printf '%s\n' | awk '{s+=$1} END {print s}')
+          python3 host/run_plugin.py target/wasm32-wasip1/release/plugin.wasm /tmp/full/pocket \
+            --host-folder /tmp/full/host --config verbose=1 --config test_card_bytes=$((used + 268435456 + 100000)) \
+            --answer "Convert them, replace"
+          python3 tests/verify.py /tmp/full replace
