@@ -868,10 +868,85 @@ fn other_images(common: &Path) -> Vec<(PathBuf, &'static str)> {
 
 // ---- CHD images ------------------------------------------------------------------
 
-/// Where a CHD (or a joined disc) is converted to: <folder>/<name>/<name>.cue.
+/// Where a CHD (or a joined disc) is converted to. A CHD's .cue and .bin go
+/// next to it (<folder>/<name>.cue), in the game's own folder, unless that
+/// would clash with other files there (a <name>.bin of its own, or a .cue
+/// that is no CHD's): then into <folder>/<name>/<name>.cue, as a joined disc
+/// always does (its .cue would take the original's name). A copy already
+/// in either place is the converted one.
 pub(crate) fn converted_cue(image: &Path) -> PathBuf {
     let base = stem(&name_of(image)).to_string();
-    image.parent().unwrap().join(&base).join(format!("{base}.cue"))
+    let folder = image.parent().unwrap();
+    let nested = folder.join(&base).join(format!("{base}.cue"));
+    if !has_ext(&name_of(image), ".chd") || is_file(&nested) {
+        return nested;
+    }
+    let flat = folder.join(format!("{base}.cue"));
+    if is_file(&flat) {
+        return flat;
+    }
+    let names: Vec<String> = fs::read_dir(folder)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| e.file_type().map_or(false, |t| t.is_file()))
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| !n.starts_with("._"))
+        .collect();
+    let chds: Vec<String> = names.iter().filter(|n| has_ext(n, ".chd")).map(|n| stem(n).to_lowercase()).collect();
+    let clash = names.iter().any(|n| {
+        n.eq_ignore_ascii_case(&format!("{base}.bin")) || (has_ext(n, ".cue") && !chds.contains(&stem(n).to_lowercase()))
+    });
+    if clash { nested } else { flat }
+}
+
+/// Move discs converted into <folder>/<name>/ by earlier versions up into
+/// <folder>, where this version puts them: only a folder holding nothing
+/// but <name>.cue and <name>.bin, with no file of those names in <folder>.
+/// A rename on the same card: nothing is copied. Returns how many moved.
+pub fn flatten_converted(card: &Path, platform: &str, log: &mut dyn FnMut(&str)) -> usize {
+    let common = card.join("Assets").join(platform).join("common");
+    let mut moved = 0;
+    for cue in walk(&common, &|n| has_ext(n, ".cue")) {
+        let inner = cue.parent().unwrap();
+        let base = stem(&name_of(&cue)).to_string();
+        if name_of(inner) != base || inner == common {
+            continue;
+        }
+        let outer = inner.parent().unwrap();
+        if outer == common {
+            continue; // a game in its own folder, as it should be
+        }
+        // Only what an earlier version made: <outer> holds nothing but this
+        // folder (and the .chd it came from), and the .cue is the plugin's
+        // (one FILE "<name>.bin" BINARY first, its own indentation).
+        let others = fs::read_dir(outer).into_iter().flatten().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).any(|n| {
+            !n.starts_with("._") && n != base && !n.eq_ignore_ascii_case(&format!("{base}.chd")) && !n.eq_ignore_ascii_case(&format!("{base}.bin"))
+        });
+        let ours = fs::read_to_string(&cue).is_ok_and(|t| {
+            t.starts_with(&format!("FILE \"{base}.bin\" BINARY\n  TRACK 01 ")) && t.matches("FILE ").count() == 1
+        });
+        if others || !ours {
+            continue;
+        }
+        let bin = inner.join(format!("{base}.bin"));
+        let entries: Vec<String> = fs::read_dir(inner).into_iter().flatten().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+        let free = |n: &str| fs::read_dir(outer).into_iter().flatten().flatten().all(|e| !e.file_name().to_string_lossy().eq_ignore_ascii_case(n));
+        let both = entries.len() == 2 && is_file(&bin) && free(&format!("{base}.bin"));
+        // An earlier move stopped after the .bin: only the .cue is left.
+        let cue_left = entries.len() == 1 && is_file(&outer.join(format!("{base}.bin")));
+        if !(both || cue_left) || !free(&format!("{base}.cue")) {
+            continue;
+        }
+        // The .bin first, then the .cue (see cue_left).
+        let up = |p: &Path| fs::rename(p, outer.join(name_of(p)));
+        if (cue_left || up(&bin).is_ok()) && up(&cue).is_ok() {
+            let _ = fs::remove_dir(inner);
+            log(&format!("moved {} up into {}", rel(&cue, &common), rel(outer, &common)));
+            moved += 1;
+        }
+    }
+    moved
 }
 
 /// Report .chd files under common that have no converted copy next to them.

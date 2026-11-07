@@ -141,6 +141,10 @@ fn run(core: &str, mode: Option<Mode>) -> PluginMessage {
         println(&format!("Converting {} disc(s) in Assets/{platform}/common ...", jobs.len()));
         convert::run(card, &platform, &jobs, mode, &mut |line| println(line));
     }
+    let moved = instances::flatten_converted(card, &platform, &mut |line| note(line));
+    if moved > 0 {
+        println(&format!("Moved {moved} disc(s) out of an extra subfolder, into their game's folder."));
+    }
     if let Some(elsewhere) = instances::games_elsewhere(card, &platform) {
         println(&format!(
             "Your games are in {elsewhere}, but {core} looks for them in Assets/{platform}/common: move each game's folder there, then Generate game files again."

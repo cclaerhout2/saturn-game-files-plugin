@@ -23,13 +23,18 @@ def check(ok, what):
 
 for key, want in expected.items():
     folder, name = key.split('/')
-    base = os.path.join(common, folder, name)
+    flat = want.get('flat') or (mode == 'replace' and 'cue' not in want)
+    base = os.path.join(common, folder) if flat else os.path.join(common, folder, name)
     cue, binf = base + '/' + name + '.cue', base + '/' + name + '.bin'
     check(os.path.isfile(cue) and os.path.isfile(binf), key + ': converted .cue and .bin')
     if 'cue' in want:
         check(open(cue).read() == want['cue'], key + ': .cue as chdman writes it')
     check(hashlib.sha1(open(binf, 'rb').read()).hexdigest() == want['bin_sha1'], key + ': .bin bytes')
     original = os.path.join(common, folder, name + ('.chd' if 'cue' in want else '.cue'))
+    if flat:
+        check(not os.path.isdir(os.path.join(common, folder, name)), key + ': no extra subfolder')
+    if 'cue' not in want:  # a joined disc: its track files
+        original = os.path.join(common, folder, name + ' (Track 01).bin')
     check(os.path.exists(original) == (mode == 'keep'), key + ': original ' + ('kept' if mode == 'keep' else 'removed'))
 
 
@@ -38,7 +43,7 @@ def game(name):
 
 
 g = game('Game A (USA)')
-check(g['data_path'] == 'Game A (USA)/Game A (USA)/' and g['data_slots'] == [
+check(g['data_path'] == 'Game A (USA)/' and g['data_slots'] == [
     {'id': 14, 'filename': 'Game A (USA).cue'}, {'id': 16, 'filename': 'Game A (USA).bin'}], 'Game A: game file')
 g = game('Redump X (Europe)')
 check([s['id'] for s in g['data_slots']] == [14, 16, 17] and g['data_slots'][2]['filename'] == 'Redump X (Europe) (Track 2).bin',
@@ -49,11 +54,15 @@ for n in (1, 2):
     g = game('Saga (USA) (Disc %d)' % n)
     check(g['data_path'] == '' and {'id': 2, 'filename': 'Saga (USA).sav'} in g['data_slots']
           and {'id': 3, 'filename': 'Saga (USA) (cartridge).sav'} in g['data_slots']
-          and g['data_slots'][0]['filename'] == 'Saga (USA) (Disc %d)/Saga (USA) (Disc %d)/Saga (USA) (Disc %d).cue' % (n, n, n),
+          and g['data_slots'][0]['filename'] == 'Saga (USA) (Disc %d)/Saga (USA) (Disc %d).cue' % (n, n),
           'Saga disc %d: shared saves' % n)
 check(open(os.path.join(card, 'Saves/saturn/common/Saga (USA).sav'), 'rb').read() == b'\xffB' * 32768, 'shared save seeded from disc 1')
+old = os.path.join(common, 'Old Game - Disc 1')
+check(sorted(os.listdir(old)) == ['Old Game (Europe).bin', 'Old Game (Europe).cue'], 'old nested conversion moved up')
+check(game('Old Game (Europe)')['data_path'] == 'Old Game - Disc 1/', 'old conversion: game file')
+check(game('Duo (Japan) (Disc 2)')['data_path'] == '', 'Duo: shared save across two CHDs in one folder')
 g = game('Many Tracks (USA)')
-check(len(g['data_slots']) == 2, 'Many Tracks: joined into one .bin')
+check(len(g['data_slots']) == 2 and g['data_path'] == ('Many Tracks (USA)/' if mode == 'replace' else 'Many Tracks (USA)/Many Tracks (USA)/'), 'Many Tracks: joined into one .bin')
 for bad in ('Lower', 'Crash', 'Old Rip'):
     check(not os.path.exists(os.path.join(games, bad + '.json')), bad + ': no game file')
 left = [os.path.join(r, f) for r, _, fs in os.walk(card) for f in fs if f.endswith('.part')]

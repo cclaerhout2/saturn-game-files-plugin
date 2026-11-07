@@ -137,6 +137,7 @@ def main():
         expected[folder + '/' + name] = {
             'cue': chdman_cue(name, tracks, pregaps),
             'bin_sha1': hashlib.sha1(b''.join(t[1] for t in tracks)).hexdigest(),
+            'flat': True,
         }
 
     chd('Game A (USA)', 'Game A (USA)', [('MODE1/2352', 300), ('AUDIO', 151), ('AUDIO', 77)], [(0, False), (150, True), (150, True)])
@@ -183,6 +184,20 @@ def main():
     psx[4 * SECTOR + 24:4 * SECTOR + 60] = b'Licensed by Sony Computer Entertain'.ljust(36)
     open(os.path.join(d, 'Crash.bin'), 'wb').write(bytes(psx))
     open(os.path.join(d, 'Crash.cue'), 'w').write('FILE "Crash.bin" BINARY\n  TRACK 01 MODE2/2352\n    INDEX 01 00:00:00\n')
+    # A disc converted by version 0.1.0/0.1.1 (into <name>/<name>.cue, the .chd
+    # replaced): moved up next to where the .chd was.
+    d = os.path.join(common, 'Old Game - Disc 1', 'Old Game (Europe)')
+    os.makedirs(d)
+    tracks = make_disc(rng, [('MODE1/2352', 25)])
+    open(os.path.join(d, 'Old Game (Europe).bin'), 'wb').write(tracks[0][1])
+    open(os.path.join(d, 'Old Game (Europe).cue'), 'w').write(chdman_cue('Old Game (Europe)', tracks, [(0, False)]))
+    # Two CHDs in one folder: both converted next to them.
+    for n in (1, 2):
+        name = 'Duo (Japan) (Disc %d)' % n
+        layout = [('MODE1/2352', 30 + n)]
+        tracks = make_disc(rng, layout)
+        write_chd(os.path.join(common, 'Duo', name + '.chd'), tracks, [(0, False)]) if os.path.isdir(os.path.join(common, 'Duo')) else (os.makedirs(os.path.join(common, 'Duo')), write_chd(os.path.join(common, 'Duo', name + '.chd'), tracks, [(0, False)]))
+        expected['Duo/' + name] = {'cue': chdman_cue(name, tracks, [(0, False)]), 'bin_sha1': hashlib.sha1(tracks[0][1]).hexdigest(), 'flat': True}
     # A per-disc save from before (Saga disc 1), to start the shared save from.
     saves = os.path.join(card, 'Saves/saturn/akoaysigod.Saturn')
     os.makedirs(saves)

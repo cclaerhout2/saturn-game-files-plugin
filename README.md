@@ -31,12 +31,18 @@ the count out from the core's `data.json`.
 
 ## What the plugin does
 
-- **CHD images.** Each `X.chd` is extracted into `X/X.cue` + `X/X.bin` next to
-  it, byte for byte as `chdman extractcd` would write them (CD audio swapped
+- **CHD images.** Each `X.chd` is extracted into `X.cue` + `X.bin` right next
+  to it, in the game's own folder, byte for byte as `chdman extractcd` would
+  write them. A `X/` subfolder is used only when files of those names are
+  already there (CD audio swapped
   to little-endian, pregaps as `INDEX 00` or `PREGAP`). You choose to keep the
   `.chd` or replace it.
 - **Discs with too many files** (more tracks than the core has slots) are
-  joined into one `.bin`, with a `.cue` whose indexes are moved to match.
+  joined into one `.bin`, with a `.cue` whose indexes are moved to match
+  (in `X/` next to the original; in its place when the original is replaced).
+- **Discs converted into a subfolder by version 0.1.0/0.1.1** are moved up
+  into their game's folder, when that folder holds nothing else (a rename on
+  the card, nothing is copied).
 - **Game files.** One `Assets/saturn/akoaysigod.Saturn/<disc>.json` per disc:
   the `.cue` in slot 14 and its files from slot 16. A `.bin` without a `.cue`
   gets slot 16 only.

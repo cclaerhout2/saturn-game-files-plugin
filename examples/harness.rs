@@ -28,6 +28,7 @@ fn main() {
     if let Some(mode) = mode {
         convert::run(card, &platform, &jobs, mode, &mut log);
     }
+    instances::flatten_converted(card, &platform, &mut log);
     match instances::make_instances(card, &core, &platform, &mut log) {
         Ok(s) => log(&format!("[summary written={} shared={}]", s.written, s.shared)),
         Err(e) => log(&format!("Stopped: {e}")),
