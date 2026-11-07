@@ -1,5 +1,6 @@
 {
   "name": "Saturn game files",
   "description": "Generates the game files for the akoaysigod Saturn core: converts CHD images to the .cue/.bin the core reads (safely, keeping or replacing the originals), one game file per disc with a shared save for multi-disc games, and checks boot.rom.",
-  "allowed_hosts": []
+  "allowed_hosts": [],
+  "logo_url": "https://raw.githubusercontent.com/cclaerhout2/saturn-game-files-plugin/main/assets/logo.png"
 }
